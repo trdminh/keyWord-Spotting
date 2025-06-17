@@ -122,10 +122,10 @@ void setup()
     ei_printf("\tFrame size: %d\n", EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE);
     ei_printf("\tSample length: %d ms.\n", EI_CLASSIFIER_RAW_SAMPLE_COUNT / 16);
     ei_printf("\tNo. of classes: %d\n", sizeof(ei_classifier_inferencing_categories) / sizeof(ei_classifier_inferencing_categories[0]));
-    if (i2s_init(SAMPLE_RATE) != ESP_OK) {
-            Serial.println("Failed to initialize I2S!");
-            while (1);
-        }
+    // if (i2s_init(SAMPLE_RATE) != ESP_OK) {
+    //         Serial.println("Failed to initialize I2S!");
+    //         while (1);
+    //     }
     
     // Initialize UART1 for communication
     uart1.begin(115200);
