@@ -12,121 +12,110 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_LOGISTIC_H_
-#define TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_LOGISTIC_H_
+#ifndef TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_INTEGER_OPS_LOGISTIC_H_
+#define TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_INTEGER_OPS_LOGISTIC_H_
 
-#include <cmath>
+#include <algorithm>
+#include <limits>
 
-#include "edge-impulse-sdk/third_party/gemmlowp/fixedpoint/fixedpoint.h"
 #include "edge-impulse-sdk/tensorflow/lite/kernels/internal/common.h"
-#include "edge-impulse-sdk/tensorflow/lite/kernels/internal/cppmath.h"
-#include "edge-impulse-sdk/tensorflow/lite/kernels/internal/quantization_util.h"
-#include "edge-impulse-sdk/tensorflow/lite/kernels/internal/types.h"
-#include "edge-impulse-sdk/tensorflow/lite/kernels/op_macros.h"
 
 namespace tflite {
-namespace reference_ops {
+namespace reference_integer_ops {
 
-inline void Logistic(const RuntimeShape& input_shape, const float* input_data,
-                     const RuntimeShape& output_shape, float* output_data) {
-  const float cutoff_upper = 16.619047164916992188f;
-  const float cutoff_lower = -9.f;
+inline void Logistic(int32_t input_zero_point, int32_t input_range_radius,
+                     int32_t input_multiplier, int32_t input_left_shift,
+                     int32_t input_size, const int8_t* input_data,
+                     int8_t* output_data) {
+  // Integer bits must be in sync with Prepare() function.
+  static constexpr int32_t kInputIntegerBits = 4;
+  static constexpr int32_t kOutputIntegerBits = 8;
+  static constexpr int8_t kMinInt8 = std::numeric_limits<int8_t>::min();
+  static constexpr int8_t kMaxInt8 = std::numeric_limits<int8_t>::max();
+  static constexpr int32_t kOutputZeroPoint = -128;
 
-  const int flat_size = MatchingFlatSize(input_shape, output_shape);
-
-  // Rational for using approximation in reference kernel.
-  // 0. This approximation gives enough precision for float.
-  // 1. This works around an issue on an embedded chipset where exp() does not
-  // return correctly as expected - exp(x) should return inf when overflown
-  // not 1.701417   IEEE 754 defines representation for inf.
-  // 2. This will speed up calculation and is matching the behavior in the
-  // optimized kernels. (check the definition of scalar_logistic_op<float>)
-
-  for (int i = 0; i < flat_size; i++) {
-    float val = input_data[i];
-    float result;
-    if (val > cutoff_upper) {
-      result = 1.0f;
-    } else if (val < cutoff_lower) {
-      result = std::exp(val);
+  for (int i = 0; i < input_size; ++i) {
+    const int32_t input =
+        static_cast<int32_t>(input_data[i]) - input_zero_point;
+    if (input <= -input_range_radius) {
+      output_data[i] = kMinInt8;
+    } else if (input >= input_range_radius) {
+      output_data[i] = kMaxInt8;
     } else {
-      result = 1.f / (1.f + std::exp(-val));
+      const int32_t input_in_q4 = MultiplyByQuantizedMultiplier(
+          input, input_multiplier, input_left_shift);
+      using FixedPoint4 = gemmlowp::FixedPoint<int32_t, kInputIntegerBits>;
+      const int32_t output_in_q0 =
+          gemmlowp::logistic(FixedPoint4::FromRaw(input_in_q4)).raw();
+
+      // Rescale and downcast.
+      using gemmlowp::RoundingDivideByPOT;
+      int32_t output_in_q23 =
+          RoundingDivideByPOT(output_in_q0, 31 - kOutputIntegerBits);
+      output_in_q23 = std::min(std::max(output_in_q23 + kOutputZeroPoint,
+                                        static_cast<int32_t>(kMinInt8)),
+                               static_cast<int32_t>(kMaxInt8));
+      output_data[i] = static_cast<int8_t>(output_in_q23);
     }
-    output_data[i] = result;
   }
 }
 
-// Convenience version that allows, for example, generated-code calls to be
-// uniform between data types.
-inline void Logistic(const LogisticParams&, const RuntimeShape& input_shape,
-                     const float* input_data, const RuntimeShape& output_shape,
-                     float* output_data) {
-  // Drop params: not needed.
-  Logistic(input_shape, input_data, output_shape, output_data);
-}
+inline void Logistic(int32_t input_multiplier, int32_t input_left_shift,
+                     int32_t input_size, const int16_t* ptr_input_data,
+                     int16_t* ptr_output_data) {
+  // We use the LUT for sigmoid and take into account, that
+  // tanh(x) = 2*sigmoid(2*x) - 1
 
-inline void Logistic(const LogisticParams& params,
-                     const RuntimeShape& input_shape, const int16_t* input_data,
-                     const RuntimeShape& output_shape, int16_t* output_data) {
-  const int flat_size = MatchingFlatSize(input_shape, output_shape);
+  // We scale by 3/4 to expand range [-8,8]->[-10.7,10.7].
+  // In case of general parameter scale, multiplier 3 is taken into account
+  // in TanhPrepare function and it is included in
+  // input_multiplier already.
 
-  for (int i = 0; i < flat_size; i++) {
-    // F0 uses 0 integer bits, range [-1, 1].
-    // This is the return type of math functions such as tanh, logistic,
-    // whose range is in [-1, 1].
-    using F0 = gemmlowp::FixedPoint<std::int16_t, 0>;
-    // F3 uses 3 integer bits, range [-8, 8], the input range expected here.
-    using F3 = gemmlowp::FixedPoint<std::int16_t, 3>;
-
-    const F3 input = F3::FromRaw(input_data[i]);
-    F0 output = gemmlowp::logistic(input);
-    output_data[i] = output.raw();
+  TFLITE_DCHECK_GE(input_left_shift, 0);
+  if (input_multiplier == 0) {  // power of two case
+    input_multiplier = 3 << input_left_shift;
+    input_left_shift = 0;
   }
-}
 
-// Quantized int8_t logistic activation.  Cheats by dequantizing and
-// requantizing around the floating point logistic method.  This implementation
-// is slow on platforms without a floating point unit.
+  int32_t round = (input_left_shift > 0) ? 1 << (input_left_shift - 1) : 0;
 
-// TODO(b/141211002): Delete this int8_t implementation once we can reuse the
-// approach used in TFLite for int8_t Logistic.
-inline void Logistic(const RuntimeShape& input_shape, const int8_t* input_data,
-                     float input_scale, int input_zero_point,
-                     const RuntimeShape& output_shape, int8_t* output_data,
-                     float output_scale, int output_zero_point) {
-  const float cutoff_upper = 16.619047164916992188f;
-  const float cutoff_lower = -9.f;
+  for (int i = 0; i < input_size; ++i, ptr_input_data++, ptr_output_data++) {
+    int32_t input_data =
+        ((*ptr_input_data) * input_multiplier + round) >> input_left_shift;
 
-  const int flat_size = MatchingFlatSize(input_shape, output_shape);
+    // We do interpolation on unsigned values.
+    uint32_t abs_input_data = abs(input_data);
 
-  // Rational for using approximation in reference kernel.
-  // 0. This approximation gives enough precision for float.
-  // 1. This works around an issue on an embedded chipset where exp() does not
-  // return correctly as expected - exp(x) should return inf when overflown
-  // not 1.701417   IEEE 754 defines representation for inf.
-  // 2. This will speed up calculation and is matching the behavior in the
-  // optimized kernels. (check the definition of scalar_logistic_op<float>)
+    // We divide by 2 power of 9, because
+    // we need to divide by 2 in power of 7 for
+    // the input conversion + 1/4 from the scale above.
 
-  for (int i = 0; i < flat_size; i++) {
-    // Dequantize.
-    float val =
-        static_cast<float>((input_data[i] - input_zero_point) * input_scale);
-    float result;
-    if (val > cutoff_upper) {
-      result = 1.0f;
-    } else if (val < cutoff_lower) {
-      result = std::exp(val);
+    // Define uh as uint32_t type not to make this function overflow.
+    uint32_t uh = abs_input_data >> 9;
+    uint32_t result;
+
+    if (uh >= 255) {
+      // Saturate to maximum.
+      result = 0x7FFF << 10;
     } else {
-      result = 1.f / (1.f + std::exp(-val));
+      uint32_t ua = sigmoid_table_uint16[uh];
+      uint32_t ub = sigmoid_table_uint16[uh + 1];
+      uint32_t ut = abs_input_data & 0x1ff;
+      // Interpolation is done using the fractional bit.
+      result = (ua << 9) + ut * (ub - ua);
     }
-    // Requantize
-    int8_t output =
-        static_cast<int8_t>(result / output_scale + output_zero_point);
-    output_data[i] = output;
+
+    result = (input_data >= 0) ? (result + (1 << 9))
+                               : ((1 << (16 + 9)) - result + (1 << 9) - 1);
+
+    // Back to 16-bit.
+    result >>= 10;
+
+    *ptr_output_data = result;
   }
 }
 
-}  // namespace reference_ops
+}  // namespace reference_integer_ops
 }  // namespace tflite
 
-#endif  // TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_LOGISTIC_H_
+#endif  // TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_INTEGER_OPS_LOGISTIC_H_
