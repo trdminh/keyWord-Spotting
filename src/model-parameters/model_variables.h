@@ -46,7 +46,7 @@
 #include "edge-impulse-sdk/classifier/ei_model_types.h"
 #include "edge-impulse-sdk/classifier/inferencing_engines/engines.h"
 
-const char* ei_classifier_inferencing_categories[] = { "Hi Ptit ", "bật đèn", "noise", "tắt đèn" };
+const char* ei_classifier_inferencing_categories[] = { "bật đèn", "noise", "tắt đèn", "unknown" };
 
 ei_dsp_named_axis_t ei_dsp_config_2_named_axes[] = {
     { .name = "Signal", .axis = 0 }
@@ -137,7 +137,7 @@ const ei_impulse_t impulse_573109_0 = {
     .project_name = "keyword_spotting_2cnn",
     .impulse_id = 1,
     .impulse_name = "Impulse #1",
-    .deploy_version = 16,
+    .deploy_version = 17,
 
     .nn_input_frame_size = 650,
     .raw_sample_count = 16000,

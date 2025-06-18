@@ -184,14 +184,17 @@ void loop()
         // Set Event Group bits based on classification
         if (result.classification[pre_ix].label == "bật đèn") {
             xEventGroupSetBits(ledEventGroup, LED_ON_BIT);
-            xEventGroupClearBits(ledEventGroup, LED_OFF_BIT | LED_WAKEUP_BIT);
+            xEventGroupClearBits(ledEventGroup, LED_OFF_BIT);
+            // xEventGroupClearBits(ledEventGroup, LED_OFF_BIT | LED_WAKEUP_BIT);
         } else if (result.classification[pre_ix].label == "tắt đèn") {
-            xEventGroupClearBits(ledEventGroup, LED_ON_BIT | LED_WAKEUP_BIT);
+            // xEventGroupClearBits(ledEventGroup, LED_ON_BIT | LED_WAKEUP_BIT);
+            xEventGroupClearBits(ledEventGroup, LED_ON_BIT);
             xEventGroupSetBits(ledEventGroup, LED_OFF_BIT);
-        } else if (result.classification[pre_ix].label == "wakeup") {
-            xEventGroupClearBits(ledEventGroup, LED_ON_BIT | LED_OFF_BIT);
-            xEventGroupSetBits(ledEventGroup, LED_WAKEUP_BIT);
-        }
+        } 
+        // else if (result.classification[pre_ix].label == "Hi Ptit") {
+        //     xEventGroupClearBits(ledEventGroup, LED_ON_BIT | LED_OFF_BIT);
+        //     xEventGroupSetBits(ledEventGroup, LED_WAKEUP_BIT);
+        // }
         else {
             xEventGroupClearBits(ledEventGroup, LED_ON_BIT | LED_OFF_BIT | LED_WAKEUP_BIT);
         }
@@ -325,51 +328,88 @@ static void microphone_inference_end(void)
     ei_free(inference.buffers[1]);
 }
 
+// void controll(void *arg) {
+//     while (1) {
+//         EventBits_t bits = xEventGroupWaitBits(ledEventGroup, 
+//                                                 LED_ON_BIT | LED_OFF_BIT | LED_WAKEUP_BIT, 
+//                                                 pdTRUE, 
+//                                                 pdFALSE, 
+//                                                 portMAX_DELAY);
+//         if (bits & LED_WAKEUP_BIT) {
+//         #if APP_LOG
+//             ei_printf("led wakeup\n");
+//         #endif
+//             digitalWrite(led_wakeup, HIGH); // Bật Led1
+//             unsigned long startTime = millis(); // Thời gian bắt đầu
+
+//             while (millis() - startTime < 500000) { // Chờ 5 giây
+//                 EventBits_t currentBits = xEventGroupGetBits(ledEventGroup);
+//                 if (currentBits & LED_ON_BIT) {
+//                     digitalWrite(led_on, HIGH);
+//                 #if APP_LOG
+//                     ei_printf("Led2 is on\n");
+//                     uart1.println('1');
+//                 #endif
+//                     vTaskDelay(50/portTICK_PERIOD_MS);
+//                     break;
+//                 }
+//                 else if (currentBits & LED_OFF_BIT) {
+//                     digitalWrite(led_on, LOW);
+//                 #if APP_LOG
+//                     ei_printf("Led2 is off\n");
+//                     uart1.println('0');
+//                 #endif
+//                     vTaskDelay(50/portTICK_PERIOD_MS);
+//                     break;
+//                 } 
+//                 // // Thêm một thời gian chờ ngắn để cho CPU xử lý các tác vụ khác
+//                 vTaskDelay(20 / portTICK_PERIOD_MS); // Thời gian chờ ngắn
+//             }
+//         #if APP_LOG
+//             ei_printf("led sleep\n");
+//         #endif
+//             digitalWrite(led_wakeup, HIGH); // Tắt Led1 sau 5 giây
+//         }
+//     }
+// }
 void controll(void *arg) {
     while (1) {
+        // Wait for LED_ON_BIT or LED_OFF_BIT events
         EventBits_t bits = xEventGroupWaitBits(ledEventGroup, 
-                                                LED_ON_BIT | LED_OFF_BIT | LED_WAKEUP_BIT, 
-                                                pdTRUE, 
-                                                pdFALSE, 
-                                                portMAX_DELAY);
-        if (bits & LED_WAKEUP_BIT) {
-        #if APP_LOG
-            ei_printf("led wakeup\n");
-        #endif
-            digitalWrite(led_wakeup, HIGH); // Bật Led1
-            unsigned long startTime = millis(); // Thời gian bắt đầu
-
-            while (millis() - startTime < 500000) { // Chờ 5 giây
-                EventBits_t currentBits = xEventGroupGetBits(ledEventGroup);
-                if (currentBits & LED_ON_BIT) {
-                    digitalWrite(led_on, HIGH);
-                #if APP_LOG
-                    ei_printf("Led2 is on\n");
-                    uart1.println('1');
-                #endif
-                    vTaskDelay(50/portTICK_PERIOD_MS);
-                    break;
-                }
-                else if (currentBits & LED_OFF_BIT) {
-                    digitalWrite(led_on, LOW);
-                #if APP_LOG
-                    ei_printf("Led2 is off\n");
-                    uart1.println('0');
-                #endif
-                    vTaskDelay(50/portTICK_PERIOD_MS);
-                    break;
-                } 
-                // // Thêm một thời gian chờ ngắn để cho CPU xử lý các tác vụ khác
-                vTaskDelay(20 / portTICK_PERIOD_MS); // Thời gian chờ ngắn
-            }
-        #if APP_LOG
-            ei_printf("led sleep\n");
-        #endif
-            digitalWrite(led_wakeup, HIGH); // Tắt Led1 sau 5 giây
+                                              LED_ON_BIT | LED_OFF_BIT, 
+                                              pdTRUE,  // Clear bits after reading
+                                              pdFALSE, // Wait for any bit, not all
+                                              portMAX_DELAY);
+        
+        // Handle turn on LED command
+        if (bits & LED_ON_BIT) {
+            digitalWrite(led_on, HIGH);
+            #if APP_LOG
+                ei_printf("Led is on\n");
+                uart1.println('1');
+            #endif
+            // Visual feedback with the wake LED (optional)
+            digitalWrite(led_wakeup, HIGH);
+            vTaskDelay(100/portTICK_PERIOD_MS);
+            digitalWrite(led_wakeup, LOW);
         }
+        
+        // Handle turn off LED command
+        else if (bits & LED_OFF_BIT) {
+            digitalWrite(led_on, LOW);
+            #if APP_LOG
+                ei_printf("Led is off\n");
+                uart1.println('0');
+            #endif
+            // Visual feedback with the wake LED (optional)
+            digitalWrite(led_wakeup, HIGH);
+            vTaskDelay(100/portTICK_PERIOD_MS);
+            digitalWrite(led_wakeup, LOW);
+        }
+        
+        vTaskDelay(50/portTICK_PERIOD_MS);
     }
 }
-
 // static int i2s_init(uint32_t sampling_rate) {
 //   // Start listening for audio: MONO @ 8/16KHz
 //   i2s_config_t i2s_config = {
