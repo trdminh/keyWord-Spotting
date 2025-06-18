@@ -42,7 +42,7 @@
 #include <stdint.h>
 #include "model_metadata.h"
 
-#include "tflite-model/tflite_learn_3_compiled.h"
+#include "tflite-model/tflite_learn_3.h"
 #include "edge-impulse-sdk/classifier/ei_model_types.h"
 #include "edge-impulse-sdk/classifier/inferencing_engines/engines.h"
 
@@ -85,13 +85,11 @@ ei_model_dsp_t ei_dsp_blocks[ei_dsp_blocks_size] = {
         nullptr, // factory function
     }
 };
-const ei_config_tflite_eon_graph_t ei_config_tflite_graph_3 = {
+const ei_config_tflite_graph_t ei_config_tflite_graph_3 = {
     .implementation_version = 1,
-    .model_init = &tflite_learn_3_init,
-    .model_invoke = &tflite_learn_3_invoke,
-    .model_reset = &tflite_learn_3_reset,
-    .model_input = &tflite_learn_3_input,
-    .model_output = &tflite_learn_3_output,
+    .model = tflite_learn_3,
+    .model_size = tflite_learn_3_len,
+    .arena_size = tflite_learn_3_arena_size
 };
 
 ei_learning_block_config_tflite_graph_t ei_learning_block_config_3 = {
@@ -105,7 +103,7 @@ ei_learning_block_config_tflite_graph_t ei_learning_block_config_3 = {
     .output_score_tensor = 2,
     .threshold = 0,
     .quantized = 1,
-    .compiled = 1,
+    .compiled = 0,
     .graph_config = (void*)&ei_config_tflite_graph_3
 };
 
@@ -139,7 +137,7 @@ const ei_impulse_t impulse_573109_0 = {
     .project_name = "keyword_spotting_2cnn",
     .impulse_id = 1,
     .impulse_name = "Impulse #1",
-    .deploy_version = 21,
+    .deploy_version = 22,
 
     .nn_input_frame_size = 650,
     .raw_sample_count = 16000,

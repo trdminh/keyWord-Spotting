@@ -1,4 +1,4 @@
-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,56 +12,79 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_INTEGER_OPS_L2NORMALIZATION_H_
-#define TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_INTEGER_OPS_L2NORMALIZATION_H_
+#ifndef TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_L2NORMALIZATION_H_
+#define TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_L2NORMALIZATION_H_
 
 #include <algorithm>
+#include <cmath>
 
+#include "edge-impulse-sdk/tensorflow/lite/core/c/common.h"
 #include "edge-impulse-sdk/tensorflow/lite/kernels/internal/common.h"
+#include "edge-impulse-sdk/tensorflow/lite/kernels/internal/types.h"
 
 namespace tflite {
-namespace reference_integer_ops {
 
-inline void L2Normalization(int32_t input_zero_point, int32_t outer_size,
-                            int32_t depth, const int8_t* input_data,
-                            int8_t* output_data) {
-  static constexpr int8_t kMinInt8 = std::numeric_limits<int8_t>::min();
-  static constexpr int8_t kMaxInt8 = std::numeric_limits<int8_t>::max();
-  // The output scale must be in sync with Prepare().
-  // Output is in 1/128 scale so the actual output range is nudged from [-1, 1]
-  // to [-1, 127/128].
-  static constexpr int32_t kOutputScale = 7;
-  for (int outer_index = 0; outer_index < outer_size; ++outer_index) {
-    // int32_t = (int8_t - int8_t) ^ 2.
-    // ([-128, 127] - [-128, 127]) ^ 2 = [0, (2^8 - 1)^2] so the accumulator is
-    // safe from overflowing in at least 2^16 steps.
-    int32_t acc = 0;
-    for (int inner_index = 0; inner_index < depth; ++inner_index) {
-      int32_t input =
-          input_data[depth * outer_index + inner_index] - input_zero_point;
-      acc += input * input;
+namespace reference_ops {
+
+inline void L2Normalization(const tflite::L2NormalizationParams& op_params,
+                            const RuntimeShape& input_shape,
+                            const float* input_data,
+                            const RuntimeShape& output_shape,
+                            float* output_data, float epsilon = 1e-6) {
+  const int trailing_dim = input_shape.DimensionsCount() - 1;
+  const int outer_size =
+      MatchingFlatSizeSkipDim(input_shape, trailing_dim, output_shape);
+  const int depth =
+      MatchingDim(input_shape, trailing_dim, output_shape, trailing_dim);
+  for (int i = 0; i < outer_size; ++i) {
+    float squared_l2_norm = 0;
+    for (int c = 0; c < depth; ++c) {
+      const float val = input_data[depth * i + c];
+      squared_l2_norm += val * val;
     }
-    int32_t inv_l2norm_multiplier;
-    int inv_l2norm_shift;
-    GetInvSqrtQuantizedMultiplierExp(acc, kReverseShift, &inv_l2norm_multiplier,
-                                     &inv_l2norm_shift);
-
-    for (int inner_index = 0; inner_index < depth; ++inner_index) {
-      int32_t input =
-          input_data[depth * outer_index + inner_index] - input_zero_point;
-
-      // Rescale and downcast. Rescale is folded into the division.
-      int32_t output_in_q24 = MultiplyByQuantizedMultiplier(
-          input, inv_l2norm_multiplier, inv_l2norm_shift + kOutputScale);
-      output_in_q24 =
-          std::min(static_cast<int32_t>(kMaxInt8),
-                   std::max(static_cast<int32_t>(kMinInt8), output_in_q24));
-      output_data[depth * outer_index + inner_index] =
-          static_cast<int8_t>(output_in_q24);
+    float l2_norm = std::sqrt(squared_l2_norm);
+    l2_norm = std::max(l2_norm, epsilon);
+    for (int c = 0; c < depth; ++c) {
+      output_data[depth * i + c] = input_data[depth * i + c] / l2_norm;
     }
   }
 }
-}  // namespace reference_integer_ops
-}  // namespace tflite
 
-#endif  // TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_INTEGER_OPS_L2NORMALIZATION_H_
+inline void L2Normalization(const tflite::L2NormalizationParams& op_params,
+                            const RuntimeShape& input_shape,
+                            const uint8_t* input_data,
+                            const RuntimeShape& output_shape,
+                            uint8_t* output_data) {
+  const int trailing_dim = input_shape.DimensionsCount() - 1;
+  const int depth =
+      MatchingDim(input_shape, trailing_dim, output_shape, trailing_dim);
+  const int outer_size =
+      MatchingFlatSizeSkipDim(input_shape, trailing_dim, output_shape);
+  const int32_t input_zero_point = op_params.input_zero_point;
+
+  for (int i = 0; i < outer_size; ++i) {
+    int32_t square_l2_norm = 0;
+    for (int c = 0; c < depth; c++) {
+      int32_t diff = input_data[depth * i + c] - input_zero_point;
+      square_l2_norm += diff * diff;
+    }
+    int32_t inv_l2norm_multiplier;
+    int inv_l2norm_shift;
+    GetInvSqrtQuantizedMultiplierExp(square_l2_norm, kReverseShift,
+                                     &inv_l2norm_multiplier, &inv_l2norm_shift);
+    for (int c = 0; c < depth; c++) {
+      int32_t diff = input_data[depth * i + c] - input_zero_point;
+      int32_t rescaled_diff = MultiplyByQuantizedMultiplierSmallerThanOneExp(
+          128 * diff, inv_l2norm_multiplier, inv_l2norm_shift);
+      int32_t unclamped_output_val = 128 + rescaled_diff;
+      int32_t output_val =
+          std::min(static_cast<int32_t>(255),
+                   std::max(static_cast<int32_t>(0), unclamped_output_val));
+      output_data[depth * i + c] = static_cast<uint8_t>(output_val);
+    }
+  }
+}
+
+}  // namespace reference_ops
+}  // namespace tflite
+#endif  // TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_L2NORMALIZATION_H_

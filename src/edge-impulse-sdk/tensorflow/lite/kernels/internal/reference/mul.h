@@ -12,22 +12,23 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_INTEGER_OPS_MUL_H_
-#define TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_INTEGER_OPS_MUL_H_
+#ifndef TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_MUL_H_
+#define TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_MUL_H_
 
 #include <algorithm>
+#include <complex>
 
-#include "edge-impulse-sdk/third_party/gemmlowp/fixedpoint/fixedpoint.h"
-#include "edge-impulse-sdk/third_party/ruy/ruy/profiler/instrumentation.h"  // from @ruy
 #include "edge-impulse-sdk/tensorflow/lite/kernels/internal/common.h"
 
 namespace tflite {
-namespace reference_integer_ops {
 
-template <typename InputType, typename OutputType>
-void MulElementwise(int size, const ArithmeticParams& params,
-                    const InputType* input1_data, const InputType* input2_data,
-                    OutputType* output_data) {
+namespace reference_ops {
+
+// Element-wise mul that can often be used for inner loop of broadcast Mul as
+// well as the non-broadcast Mul.
+inline void MulElementwise(int size, const ArithmeticParams& params,
+                           const uint8_t* input1_data,
+                           const uint8_t* input2_data, uint8_t* output_data) {
   for (int i = 0; i < size; ++i) {
     const int32_t input1_val = params.input1_offset + input1_data[i];
     const int32_t input2_val = params.input2_offset + input2_data[i];
@@ -39,7 +40,7 @@ void MulElementwise(int size, const ArithmeticParams& params,
     const int32_t clamped_output =
         std::min(params.quantized_activation_max,
                  std::max(params.quantized_activation_min, unclamped_result));
-    output_data[i] = static_cast<OutputType>(clamped_output);
+    output_data[i] = static_cast<uint8_t>(clamped_output);
   }
 }
 
@@ -48,55 +49,54 @@ inline void Mul(const ArithmeticParams& params,
                 const RuntimeShape& input1_shape, const T* input1_data,
                 const RuntimeShape& input2_shape, const T* input2_data,
                 const RuntimeShape& output_shape, T* output_data) {
+  T output_activation_min;
+  T output_activation_max;
+  GetActivationParams(params, &output_activation_min, &output_activation_max);
+
+  const int flat_size =
+      MatchingExtendedShapeFlatSize(input1_shape, input2_shape, output_shape);
+  for (int i = 0; i < flat_size; ++i) {
+    output_data[i] = ActivationFunctionWithMinMax(
+        input1_data[i] * input2_data[i], output_activation_min,
+        output_activation_max);
+  }
+}
+
+inline void Mul(const ArithmeticParams& params,
+                const RuntimeShape& input1_shape,
+                const std::complex<float>* input1_data,
+                const RuntimeShape& input2_shape,
+                const std::complex<float>* input2_data,
+                const RuntimeShape& output_shape,
+                std::complex<float>* output_data) {
+  const int flat_size =
+      MatchingExtendedShapeFlatSize(input1_shape, input2_shape, output_shape);
+  for (int i = 0; i < flat_size; ++i) {
+    output_data[i] = input1_data[i] * input2_data[i];
+  }
+}
+
+inline void Mul(const ArithmeticParams& params,
+                const RuntimeShape& input1_shape, const uint8_t* input1_data,
+                const RuntimeShape& input2_shape, const uint8_t* input2_data,
+                const RuntimeShape& output_shape, uint8_t* output_data) {
   TFLITE_DCHECK_LE(params.quantized_activation_min,
                    params.quantized_activation_max);
-  ruy::profiler::ScopeLabel label("Mul/8bit");
   const int flat_size =
-      MatchingElementsSize(input1_shape, input2_shape, output_shape);
+      MatchingExtendedShapeFlatSize(input1_shape, input2_shape, output_shape);
 
   MulElementwise(flat_size, params, input1_data, input2_data, output_data);
 }
 
-// Mul with 16 bit inputs and int8_t outputs.
-inline void Mul(const ArithmeticParams& params,
-                const RuntimeShape& input1_shape, const int16_t* input1_data,
-                const RuntimeShape& input2_shape, const int16_t* input2_data,
-                const RuntimeShape& output_shape, int8_t* output_data) {
-  ruy::profiler::ScopeLabel label("Mul/Int16Int8");
-  int32_t output_offset = params.output_offset;
-  int32_t output_activation_min = params.quantized_activation_min;
-  int32_t output_activation_max = params.quantized_activation_max;
-  TFLITE_DCHECK_LE(output_activation_min, output_activation_max);
-
-  const int flat_size =
-      MatchingElementsSize(input1_shape, input2_shape, output_shape);
-
-  for (int i = 0; i < flat_size; i++) {
-    // F0 uses 0 integer bits, range [-1, 1].
-    using F0 = gemmlowp::FixedPoint<std::int16_t, 0>;
-
-    F0 unclamped_result =
-        F0::FromRaw(input1_data[i]) * F0::FromRaw(input2_data[i]);
-    int16_t rescaled_result =
-        gemmlowp::RoundingDivideByPOT(unclamped_result.raw(), 8);
-    int16_t clamped_result = std::min<int16_t>(
-        output_activation_max - output_offset, rescaled_result);
-    clamped_result = std::max<int16_t>(output_activation_min - output_offset,
-                                       clamped_result);
-    output_data[i] = output_offset + clamped_result;
-  }
-}
-
-template <typename T>
-inline void BroadcastMul4DSlow(
-    const ArithmeticParams& params, const RuntimeShape& input1_shape,
-    const T* input1_data, const RuntimeShape& input2_shape,
-    const T* input2_data, const RuntimeShape& output_shape, T* output_data) {
-  ruy::profiler::ScopeLabel label("BroadcastMul4DSlow");
-
+inline void BroadcastMul4DSlow(const ArithmeticParams& params,
+                               const RuntimeShape& input1_shape,
+                               const uint8_t* input1_data,
+                               const RuntimeShape& input2_shape,
+                               const uint8_t* input2_data,
+                               const RuntimeShape& output_shape,
+                               uint8_t* output_data) {
   NdArrayDesc<4> desc1;
   NdArrayDesc<4> desc2;
-  // The input shapes are extended as part of NdArrayDesc initialization.
   NdArrayDescsForElementwiseBroadcast(input1_shape, input2_shape, &desc1,
                                       &desc2);
   const RuntimeShape extended_output_shape =
@@ -121,13 +121,94 @@ inline void BroadcastMul4DSlow(
               params.quantized_activation_max,
               std::max(params.quantized_activation_min, unclamped_result));
           output_data[Offset(extended_output_shape, b, y, x, c)] =
-              static_cast<T>(clamped_output);
+              static_cast<uint8_t>(clamped_output);
         }
       }
     }
   }
 }
 
-}  // namespace reference_integer_ops
+template <typename T>
+void BroadcastMul4DSlow(const ArithmeticParams& params,
+                        const RuntimeShape& unextended_input1_shape,
+                        const T* input1_data,
+                        const RuntimeShape& unextended_input2_shape,
+                        const T* input2_data,
+                        const RuntimeShape& unextended_output_shape,
+                        T* output_data) {
+  T output_activation_min;
+  T output_activation_max;
+  GetActivationParams(params, &output_activation_min, &output_activation_max);
+
+  TFLITE_DCHECK_LE(unextended_input1_shape.DimensionsCount(), 4);
+  TFLITE_DCHECK_LE(unextended_input2_shape.DimensionsCount(), 4);
+  TFLITE_DCHECK_LE(unextended_output_shape.DimensionsCount(), 4);
+  const RuntimeShape output_shape =
+      RuntimeShape::ExtendedShape(4, unextended_output_shape);
+
+  NdArrayDesc<4> desc1;
+  NdArrayDesc<4> desc2;
+  NdArrayDescsForElementwiseBroadcast(unextended_input1_shape,
+                                      unextended_input2_shape, &desc1, &desc2);
+
+  // In Tensorflow, the dimensions are canonically named (batch_number, row,
+  // col, channel), with extents (batches, height, width, depth), with the
+  // trailing dimension changing most rapidly (channels has the smallest stride,
+  // typically 1 element).
+  //
+  // In generated C code, we store arrays with the dimensions reversed. The
+  // first dimension has smallest stride.
+  //
+  // We name our variables by their Tensorflow convention, but generate C code
+  // nesting loops such that the innermost loop has the smallest stride for the
+  // best cache behavior.
+  for (int b = 0; b < output_shape.Dims(0); ++b) {
+    for (int y = 0; y < output_shape.Dims(1); ++y) {
+      for (int x = 0; x < output_shape.Dims(2); ++x) {
+        for (int c = 0; c < output_shape.Dims(3); ++c) {
+          output_data[Offset(output_shape, b, y, x, c)] =
+              ActivationFunctionWithMinMax(
+                  input1_data[SubscriptToIndex(desc1, b, y, x, c)] *
+                      input2_data[SubscriptToIndex(desc2, b, y, x, c)],
+                  output_activation_min, output_activation_max);
+        }
+      }
+    }
+  }
+}
+
+inline void BroadcastMul4DSlow(const ArithmeticParams& params,
+                               const RuntimeShape& unextended_input1_shape,
+                               const std::complex<float>* input1_data,
+                               const RuntimeShape& unextended_input2_shape,
+                               const std::complex<float>* input2_data,
+                               const RuntimeShape& unextended_output_shape,
+                               std::complex<float>* output_data) {
+  TFLITE_DCHECK_LE(unextended_input1_shape.DimensionsCount(), 4);
+  TFLITE_DCHECK_LE(unextended_input2_shape.DimensionsCount(), 4);
+  TFLITE_DCHECK_LE(unextended_output_shape.DimensionsCount(), 4);
+  const RuntimeShape output_shape =
+      RuntimeShape::ExtendedShape(4, unextended_output_shape);
+
+  NdArrayDesc<4> desc1;
+  NdArrayDesc<4> desc2;
+  NdArrayDescsForElementwiseBroadcast(unextended_input1_shape,
+                                      unextended_input2_shape, &desc1, &desc2);
+
+  for (int b = 0; b < output_shape.Dims(0); ++b) {
+    for (int y = 0; y < output_shape.Dims(1); ++y) {
+      for (int x = 0; x < output_shape.Dims(2); ++x) {
+        for (int c = 0; c < output_shape.Dims(3); ++c) {
+          output_data[Offset(output_shape, b, y, x, c)] =
+              input1_data[SubscriptToIndex(desc1, b, y, x, c)] *
+              input2_data[SubscriptToIndex(desc2, b, y, x, c)];
+        }
+      }
+    }
+  }
+}
+
+}  // namespace reference_ops
 }  // namespace tflite
-#endif  // TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_INTEGER_OPS_MUL_H_
+
+#endif  // TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_MUL_H_

@@ -436,16 +436,16 @@ void controll(void *arg)
                 digitalWrite(led_on, HIGH);
                 flag_wakeup = false; // Reset the flag after turning on the LED
             }
-        #if APP_LOG
-                    ei_printf("Led is on\n");
-                    uart1.println('1');
-        #endif
-                    // digitalWrite(led_noti, HIGH);
-                    // vTaskDelay(100 / portTICK_PERIOD_MS);
-                    // digitalWrite(led_noti, LOW);
-                }
-                // Handle turn off LED command
-                else if (bits & LED_OFF_BIT)
+            #if APP_LOG
+                        ei_printf("Led is on\n");
+                        uart1.println('1');
+            #endif
+                        // digitalWrite(led_noti, HIGH);
+                        // vTaskDelay(100 / portTICK_PERIOD_MS);
+                        // digitalWrite(led_noti, LOW);
+        }
+                    // Handle turn off LED command
+        else if (bits & LED_OFF_BIT)
                 {
                     if (flag_wakeup)
                     {
