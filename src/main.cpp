@@ -183,17 +183,17 @@ void loop()
         // Set Event Group bits based on classification
         if (result.classification[pre_ix].label == "bật đèn") {
             xEventGroupSetBits(ledEventGroup, LED_ON_BIT);
-            xEventGroupClearBits(ledEventGroup, LED_OFF_BIT);
+            xEventGroupClearBits(ledEventGroup, LED_OFF_BIT | LED_WAKEUP_BIT);
             // xEventGroupClearBits(ledEventGroup, LED_OFF_BIT | LED_WAKEUP_BIT);
         } else if (result.classification[pre_ix].label == "tắt đèn") {
             // xEventGroupClearBits(ledEventGroup, LED_ON_BIT | LED_WAKEUP_BIT);
-            xEventGroupClearBits(ledEventGroup, LED_ON_BIT);
+            xEventGroupClearBits(ledEventGroup, LED_ON_BIT | LED_WAKEUP_BIT);
             xEventGroupSetBits(ledEventGroup, LED_OFF_BIT);
         } 
-        // else if (result.classification[pre_ix].label == "Hi Ptit") {
-        //     xEventGroupClearBits(ledEventGroup, LED_ON_BIT | LED_OFF_BIT);
-        //     xEventGroupSetBits(ledEventGroup, LED_WAKEUP_BIT);
-        // }
+        else if (result.classification[pre_ix].label == "Hi Ptit") {
+            xEventGroupClearBits(ledEventGroup, LED_ON_BIT | LED_OFF_BIT);
+            xEventGroupSetBits(ledEventGroup, LED_WAKEUP_BIT);
+        }
         else {
             xEventGroupClearBits(ledEventGroup, LED_ON_BIT | LED_OFF_BIT | LED_WAKEUP_BIT);
         }
@@ -405,7 +405,17 @@ void controll(void *arg) {
             vTaskDelay(100/portTICK_PERIOD_MS);
             digitalWrite(led_wakeup, LOW);
         }
-        
+        else if (bits & LED_WAKEUP_BIT) {
+            digitalWrite(led_on, LOW);
+            #if APP_LOG
+                ei_printf("Led wake up\n");
+                uart1.println('0');
+            #endif
+            // Visual feedback with the wake LED (optional)
+            digitalWrite(led_wakeup, HIGH);
+            vTaskDelay(100/portTICK_PERIOD_MS);
+            digitalWrite(led_wakeup, LOW);
+        }
         vTaskDelay(50/portTICK_PERIOD_MS);
     }
 }
