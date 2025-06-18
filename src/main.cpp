@@ -104,7 +104,6 @@ void setup()
     // comment out the below line to cancel the wait for USB connection (needed for native USB)
     pinMode(led_wakeup, OUTPUT);
     pinMode(led_on, OUTPUT);
-    while (!Serial);
     Serial.println("Edge Impulse Inferencing Demo");
     I2S.setAllPins(-1, 42, 41, -1, -1);
     if (!I2S.begin(PDM_MONO_MODE, SAMPLE_RATE, SAMPLE_BITS)) {
