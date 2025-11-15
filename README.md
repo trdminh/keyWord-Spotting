@@ -10,21 +10,19 @@ Set up your label and use this repo to record voice with sd card and esp32s3 xia
 
 ![image](https://camo.githubusercontent.com/0f624eb8fdcd49e0cd967565bd4ff1e5088fad0a26182d403b457613f190411f/68747470733a2f2f66696c65732e736565656473747564696f2e636f6d2f77696b692f7869616f657370333273335f6b77732f312e706e67)
 
-##### Step 1:
+#### Step 1: Upload data
 Upload dataset and set up label for this data from your device to Edge Impulse.
 
 <img width="1830" height="924" alt="image" src="https://github.com/user-attachments/assets/9b917013-839b-4c8e-848f-dba4d8ed0a6f" />
 
 Set up this for training dataset.
 
-##### Step 2:
-Create impulse for our model
+#### Step 2: Create impulse for our model
+
 
 <img width="1828" height="921" alt="image" src="https://github.com/user-attachments/assets/4e28e025-ffca-4c19-9edd-1fbd6b866152" />
 
-##### Step 3:
-
-Feature extraction with MFCCs
+#### Step 3: Feature extraction with MFCCs
 1. Pre-emphasis
     A pre-emphasis filter is applied to boost high frequencies:
         𝑦[𝑛]=𝑥[𝑛]−0.98𝑥[𝑛−1]
@@ -44,11 +42,15 @@ Feature extraction with MFCCs
 
 <img width="705" height="879" alt="image" src="https://github.com/user-attachments/assets/dc235e60-2e57-484f-8b92-4c3f84ed3bdf" />
 
-### Step 3: Training model
-Set up neural netword, batch size and learning rate for model in Edge Impulse and see the accurancy of our model.
-<img width="1836" height="921" alt="image" src="https://github.com/user-attachments/assets/88375bec-d9a9-4dec-85eb-58489cf7c48c" />
+#### Step 4: Training model
+Set up neural netword, batch size and learning rate for model in Edge Impulse.
+<img width="701" height="922" alt="image" src="https://github.com/user-attachments/assets/8c678701-60e5-4d18-b01c-0ed0167495b8" />
 
-### Step 4: Deploy model
+After training you can see the accurancy of our model.
+<img width="1521" height="922" alt="image" src="https://github.com/user-attachments/assets/b80b95db-1167-45f4-bae1-f8210b937c63" />
+
+
+#### Step 5: Deploy model
 
 Build and deploy this model with Arduino Library. This is true for esp and arduino when you use Arduino IDE or platform.io .
 If you use different platform, you can select. When don't have platform you need, You build to C/C++ library and write CMake and Makefile to link this library with your project.
